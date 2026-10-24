@@ -1,0 +1,8 @@
+.matlab_prefs/
+.matlab_temp/
+matlab_*.log
+test_output/
+results/
+MathWorks/
+*.asv
+*.m~
