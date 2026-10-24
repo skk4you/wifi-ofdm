@@ -1,5 +1,7 @@
 # Wi-Fi TX/RX and RF calibration simulator
 
+**Version 2.0.0** — conducted RX power sweeps, received-SNR estimation, and an editable single-sweep driver. See [CHANGELOG.md](CHANGELOG.md).
+
 MATLAB R2018a with **WLAN System Toolbox** (renamed WLAN Toolbox in later releases). This project uses the installed standard-specific packet generator and receivers; it does not substitute arbitrary OFDM tone allocations for Wi-Fi packets.
 
 Open `C:\Codex\ofdm-wifi` in MATLAB and run:
@@ -19,6 +21,40 @@ The quick default uses only 20–40 packets per SNR point. For useful low-PER me
 r = wifi_sim(struct('snrDB',15:2:35, 'maxPackets',2000, ...
     'minPackets',200, 'maxPacketErrors',100, 'outputDir','results/ac'));
 ```
+
+## Conducted RX PER versus input power (LitePoint-style)
+
+For an editable driver, open **`run_rx_per.m`**, adjust the settings, and click **Run** (or type `run_rx_per`). It runs a single sweep, defaults to -100:5:0 dBm with 1,000 packets per level, and leaves results in `r`. It includes receiver/ADC/trim controls and commented examples for 11a/g/n/ac. The `check_wifi_rx_per` function is a multi-case regression test, not the measurement driver.
+
+```matlab
+r = wifi_rx_per(struct('standard','11ac','mcs',3, ...
+    'band','5GHz','channelNumber',36,'bandwidth',20, ...
+    'inputPowerDBm',-100:1:-50,'packetsPerLevel',1000));
+disp(r.summary)
+```
+
+This sends exactly 1,000 simulated packets at **every** input level, with no error-count early stop. `ReceivedOK` counts packets that synchronize and recover the entire known PSDU correctly. `LostOrBad = Sent - ReceivedOK`, and `PER = LostOrBad / Sent`; both fractional PER and PER percent are exported. A missing acquisition counts as a packet error. The 95% Wilson bounds describe the finite packet count; zero errors in 1,000 packets still has an upper bound near 0.38%.
+
+The test figure and exported `rx_per.png` show four plots versus DUT input power: PER, successfully received packet count, **estimated received SNR**, and RMS EVM (%). Received SNR uses the two received L-LTF symbols after the RX frontend and timing/CFO correction: their difference estimates noise power; their average estimates signal power after subtracting the average's noise bias. Signal and noise powers are summed across acquired packets before taking the dB ratio. `ReceivedSNRdB` and `SNRPackets` expose the estimate and its packet population; the existing `SNRdB` column retains the configured input SNR for comparison. No acquisition produces NaN/gaps rather than an injected-SNR substitute. This is occupied-L-LTF-carrier SNR, so it need not equal full-band input sample SNR. It assumes the channel/signal is stable across the repeated training symbols: static IQ/clipping distortion can cancel in the difference and is not fully represented as noise. Use EVM alongside it. Both estimates include acquired packets with bad payloads, and are conditional on acquisition.
+
+The input power is at the DUT connector/reference plane, not the generator before cable loss. The receiver noise floor is held fixed at `10*log10(k*290*Fs)+30+noiseFigureDB` dBm, using the full complex-sample bandwidth `Fs`. At 20 MHz and 7 dB NF this is about -94 dBm. Each packet's generator waveform is normalized to the requested average packet power, then amplified with fixed gain. Changing input power changes SNR; noise is **not** scaled to follow it. The 290 K noise-figure model follows [MathWorks thermal noise guidance](https://www.mathworks.com/help/comm/ref/receiverthermalnoise.html).
+
+`channelNumber` is the **center channel** (e.g. 36 at 20 MHz, 42 for an 80 MHz block), with `band='2.4GHz'` or `'5GHz'`. It records center frequency; baseband processing does not simulate RF tuning, regional channel legality, channel-specific matching/filter loss, or frequency-dependent NF. Set NF/impairments from your measurements when comparing channels. This test is one conducted SISO radio, not simultaneous/concurrent radios or MIMO.
+
+Receiver DC/IQ trim, CFO, PA/TX IQ, and other existing settings can be passed to `wifi_rx_per`. `referenceInputDBm` (default -40 dBm) defines the DUT input power giving unit average complex-sample power at the ADC input, before RX errors; it represents a fixed gain setting. ADC clipping and quantization are disabled by default (`adcBits=Inf`). Therefore an ideal run shows a sensitivity waterfall and can remain error free at stronger powers; a two-sided bathtub is not artificially imposed.
+
+To include a modeled overload edge from a fixed-gain ADC:
+
+```matlab
+b = wifi_rx_per(struct('standard','11ac','mcs',3, ...
+    'channelNumber',36,'bandwidth',20,'inputPowerDBm',-100:1:-5, ...
+    'packetsPerLevel',1000,'adcBits',10,'adcFullScale',1, ...
+    'referenceInputDBm',-40,'outputDir','results/rx_bathtub'));
+```
+
+This is a simplified fixed-gain clipping experiment, not an AGC/LNA gain-state or calibrated DUT compression model. A real radio's upper bathtub edge requires measured AGC/compression/blocker behavior. `rxDC` remains in ADC waveform units, so its relative effect changes with input power. Cable loss can be handled by supplying DUT-plane powers directly. The modeled channel and bandwidth alone cannot predict a particular chip's absolute sensitivity without an appropriate noise figure and impairment budget.
+
+Results include `lowestPassingDBm` (lowest **tested** point meeting `perThreshold`, default 10%), all contiguous `passWindowsDBm`, and flags indicating whether failing test points bracket the edges. No interpolation or extrapolation is used; inspect all pass windows for noisy/nonmonotonic results. The default export directory is `results/rx_per`, containing `rx_per.csv`, `rx_per.mat`, and `rx_per.png`. `check_wifi_rx_per` tests exact 1,000-packet accounting, thermal noise scaling, weak/strong input behavior, and an ADC overload bathtub. A 51-level sweep sends 51,000 waveforms and can take appreciably longer than the quick SNR demo.
 
 ## Implemented signal chain
 

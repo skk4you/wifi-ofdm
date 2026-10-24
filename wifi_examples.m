@@ -15,6 +15,8 @@ switch lower(experiment)
         r=wifi_sim(struct('paBackoffDB',3,'snrDB',10:5:40));
     case 'adc'
         r=wifi_sim(struct('adcBits',7,'adcFullScale',2,'snrDB',10:5:40));
+    case 'rxper'
+        r=wifi_rx_per;
     case 'standards'
         standards={'11a','11n','11ac'}; r=cell(1,3);
         for k=1:3
@@ -27,6 +29,6 @@ switch lower(experiment)
         end
         subplot(1,2,1); grid on; xlabel('SNR (dB)'); ylabel('PER'); legend(standards);
         subplot(1,2,2); grid on; xlabel('SNR (dB)'); ylabel('EVM (dB)'); legend(standards);
-    otherwise, error('Choose baseline, trim, multipath, mimo, pa, adc or standards.');
+    otherwise, error('Choose baseline, trim, multipath, mimo, pa, adc, rxper or standards.');
 end
 end

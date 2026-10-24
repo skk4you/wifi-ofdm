@@ -15,6 +15,16 @@ previous=rng; restore=onCleanup(@()rng(previous)); %#ok<NASGU>
 rng(c.seed,'twister');
 [phy,format,dataField]=configuration(c);
 fs=wlanSampleRate(phy); ind=wlanFieldIndices(phy);
+powerSweep=~isempty(c.inputPowerDBm);
+if powerSweep
+    assert(strcmpi(c.channel,'awgn') && c.nTx==1 && c.nRx==1, ...
+        'Conducted input-power mode currently requires SISO AWGN.');
+    % Complex baseband spans fs Hz; NF is referenced to 290 K.
+    noiseFloorDBm=10*log10(1.380649e-23*290*fs)+30+c.noiseFigureDB;
+    c.snrDB=c.inputPowerDBm-noiseFloorDBm;
+else
+    noiseFloorDBm=NaN;
+end
 if strcmp(format,'VHT'), nBits=8*phy.PSDULength; else, nBits=8*c.payloadBytes; end
 rec=wlanRecoveryConfig('EqualizationMethod',c.equalizer, ...
     'PilotPhaseTracking',c.pilotTracking);
@@ -22,6 +32,7 @@ rec=wlanRecoveryConfig('EqualizationMethod',c.equalizer, ...
 channel=makeChannel(c,fs,phy);
 nSNR=numel(c.snrDB);
 r=struct('settings',c,'phy',phy,'sampleRate',fs,'calibration',cal);
+r.noiseFloorDBm=noiseFloorDBm;
 % Independent tone at a different frequency/amplitude from calibration.
 nn=(0:c.calibrationSamples-1).';
 probe=0.5*exp(2i*pi*293*nn/c.calibrationSamples);
@@ -32,11 +43,12 @@ r.frontendMetrics=struct('residualDC',probeFit(3), ...
     'toneEVMPercent',100*norm(probeOut-probe)/norm(probe));
 fields={'packets','packetErrors','syncFailures','bitErrors','decodedBits', ...
     'decodedPackets','evmPackets','evmPercent','evmDB','effectiveSNRDB', ...
-    'measuredSNRDB','per','berDecoded','goodputMbps','perLower','perUpper'};
+    'measuredSNRDB','rxSNRDB','rxSNRPackets','per','berDecoded','goodputMbps','perLower','perUpper'};
 for k=1:numel(fields), r.(fields{k})=zeros(1,nSNR); end
 r.diagnostic=struct;
 for s=1:nSNR
     errorEnergy=0; referenceEnergy=0; signalEnergy=0; noiseEnergy=0; airtime=0;
+    trainingSignal=0; trainingNoise=0;
     while r.packets(s)<c.maxPackets
         if r.packets(s)>=c.minPackets && r.packetErrors(s)>=c.maxPacketErrors, break; end
         bits=randi([0 1],nBits,1);
@@ -64,7 +76,16 @@ for s=1:nSNR
         % before RX IQ/DC/ADC; never includes idle padding in power estimate.
         active=propagated(c.packetDelay+(1:size(tx,1)),:);
         power=mean(abs(active(:)).^2);
-        nv=power*10^(-c.snrDB(s)/10);
+        if powerSweep
+            % Normalize generator power at the DUT input reference plane,
+            % then apply fixed receiver gain. Noise never follows signal.
+            target=10^((c.inputPowerDBm(s)-c.referenceInputDBm)/10);
+            propagated=propagated*sqrt(target/power);
+            active=propagated(c.packetDelay+(1:size(tx,1)),:);
+            nv=10^((noiseFloorDBm-c.referenceInputDBm)/10);
+        else
+            nv=power*10^(-c.snrDB(s)/10);
+        end
         noise=sqrt(nv/2)*(randn(size(propagated))+1i*randn(size(propagated)));
         rx=wifi_rx_frontend(propagated+noise,c,cal);
         signalEnergy=signalEnergy+sum(abs(active(:)).^2);
@@ -77,7 +98,12 @@ for s=1:nSNR
             continue
         end
         % Do not hide implementation exceptions as packet errors.
-        [received,equalized,h,nvar]=decode(aligned,phy,format,dataField,ind,rec);
+        [received,equalized,h,nvar,ltfSignal,ltfNoise]=decode(aligned,phy,format,dataField,ind,rec);
+        if isfinite(ltfSignal) && isfinite(ltfNoise) && ltfNoise>0
+            trainingSignal=trainingSignal+ltfSignal;
+            trainingNoise=trainingNoise+ltfNoise;
+            r.rxSNRPackets(s)=r.rxSNRPackets(s)+1;
+        end
         assert(numel(received)==numel(bits),'Recovered PSDU length mismatch.');
         be=sum(double(received(:))~=bits);
         r.bitErrors(s)=r.bitErrors(s)+be;
@@ -107,8 +133,13 @@ for s=1:nSNR
         r.evmPercent(s)=NaN; r.evmDB(s)=NaN; r.effectiveSNRDB(s)=NaN;
     end
     r.measuredSNRDB(s)=10*log10(signalEnergy/max(noiseEnergy,realmin));
+    r.rxSNRDB(s)=NaN;
+    if r.rxSNRPackets(s)>0
+        r.rxSNRDB(s)=10*log10(max(trainingSignal,realmin)/trainingNoise);
+    end
     r.goodputMbps(s)=nBits*(r.packets(s)-r.packetErrors(s))/airtime/1e6;
-    fprintf('%s %3g dB: PER %.3f (%d/%d), EVM %.2f%%, decoded BER %.3g, sync fails %d\n', ...
+    if powerSweep, fprintf('Input %g dBm | ',c.inputPowerDBm(s)); end
+    fprintf('%s SNR %3g dB: PER %.3f (%d/%d), EVM %.2f%%, decoded BER %.3g, sync fails %d\n', ...
         c.standard,c.snrDB(s),r.per(s),r.packetErrors(s),r.packets(s), ...
         r.evmPercent(s),r.berDecoded(s),r.syncFailures(s));
 end
@@ -198,9 +229,14 @@ function y=rotate(x,hz,fs)
 y=bsxfun(@times,x,exp(2i*pi*hz*(0:size(x,1)-1).'/fs));
 end
 
-function [bits,eq,h,nv]=decode(rx,phy,format,dataField,ind,rec)
+function [bits,eq,h,nv,ltfSignal,ltfNoise]=decode(rx,phy,format,dataField,ind,rec)
 lltf=wlanLLTFDemodulate(rx(ind.LLTF(1):ind.LLTF(2),:),phy.ChannelBandwidth);
 delta=lltf(:,1,:)-lltf(:,2,:); nv=mean(abs(delta(:)).^2)/2;
+% Two repeated received L-LTF symbols: difference cancels the stationary
+% channel/signal. Their average contains half the single-symbol noise power.
+ltfMean=(lltf(:,1,:)+lltf(:,2,:))/2;
+ltfNoise=nv;
+ltfSignal=max(mean(abs(ltfMean(:)).^2)-ltfNoise/2,0);
 switch format
     case 'NonHT', h=wlanLLTFChannelEstimate(lltf,phy.ChannelBandwidth);
     case 'HT'
@@ -227,6 +263,11 @@ end
 
 function validate(c)
 validateattributes(c.snrDB,{'numeric'},{'vector','real','finite','nonempty'});
+if ~isempty(c.inputPowerDBm)
+    validateattributes(c.inputPowerDBm,{'numeric'},{'vector','real','finite','nonempty'});
+end
+validateattributes(c.noiseFigureDB,{'numeric'},{'scalar','real','finite','nonnegative'});
+validateattributes(c.referenceInputDBm,{'numeric'},{'scalar','real','finite'});
 for f={'maxPackets','minPackets','maxPacketErrors','payloadBytes','nTx','nRx','nStreams','calibrationSamples'}
     validateattributes(c.(f{1}),{'numeric'},{'scalar','integer','positive'});
 end
