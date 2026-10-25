@@ -1,6 +1,6 @@
 # Wi-Fi TX/RX and RF calibration simulator
 
-**Version 2.0.0** — conducted RX power sweeps, received-SNR estimation, and an editable single-sweep driver. See [CHANGELOG.md](CHANGELOG.md).
+**Version 3.0.0** — RX test plans, timestamped run folders, and sensitivity extraction with optional fine power steps. See [CHANGELOG.md](CHANGELOG.md).
 
 MATLAB R2018a with **WLAN System Toolbox** (renamed WLAN Toolbox in later releases). This project uses the installed standard-specific packet generator and receivers; it does not substitute arbitrary OFDM tone allocations for Wi-Fi packets.
 
@@ -54,7 +54,74 @@ b = wifi_rx_per(struct('standard','11ac','mcs',3, ...
 
 This is a simplified fixed-gain clipping experiment, not an AGC/LNA gain-state or calibrated DUT compression model. A real radio's upper bathtub edge requires measured AGC/compression/blocker behavior. `rxDC` remains in ADC waveform units, so its relative effect changes with input power. Cable loss can be handled by supplying DUT-plane powers directly. The modeled channel and bandwidth alone cannot predict a particular chip's absolute sensitivity without an appropriate noise figure and impairment budget.
 
-Results include `lowestPassingDBm` (lowest **tested** point meeting `perThreshold`, default 10%), all contiguous `passWindowsDBm`, and flags indicating whether failing test points bracket the edges. No interpolation or extrapolation is used; inspect all pass windows for noisy/nonmonotonic results. The default export directory is `results/rx_per`, containing `rx_per.csv`, `rx_per.mat`, and `rx_per.png`. `check_wifi_rx_per` tests exact 1,000-packet accounting, thermal noise scaling, weak/strong input behavior, and an ADC overload bathtub. A 51-level sweep sends 51,000 waveforms and can take appreciably longer than the quick SNR demo.
+Results include `lowestPassingDBm` (lowest **tested** point meeting `perThreshold`, default 10%), all contiguous `passWindowsDBm`, and a separate interpolated sensitivity estimate described below. The default output parent is `results/rx_per`; each run gets a timestamped subfolder containing `rx_per.csv`, `rx_per.mat`, `rx_per.png` (when plotting), `sensitivity.csv`, and full configuration files. `check_wifi_rx_per` tests exact packet accounting, thermal noise scaling, weak/strong input behavior, and an ADC overload bathtub. A 51-level sweep sends 51,000 waveforms at 1,000 packets per level and can take appreciably longer than the quick SNR demo.
+
+## Version 3 test workflow
+
+### Single tests and separate folders
+
+Edit `run_rx_per.m` and run it normally. By default, `uniqueOutputDir=true` reserves a new folder for every invocation, even for identical settings:
+
+```text
+<MATLAB current folder>/results/rx_per/
+    11ac_mcs3_ch36_bw20_20261025_123456_789/
+        configuration.mat
+        configuration.json
+        rx_per.mat
+        rx_per.csv
+        rx_per.png
+        sensitivity.csv
+```
+
+Use `r.outputDir` for the actual path; `r.settings.outputDir` records the requested parent. `configuration.mat` is the exact reloadable configuration, including complex values and Inf. The readable JSON represents complex values as real/imaginary fields and scalar nonfinite controls such as Inf as strings. `rx_per.mat` includes the configuration and results too. Setting `outputDir=''` disables file output; `uniqueOutputDir=false` explicitly restores the old overwrite-in-place behavior.
+
+When running from another folder, use `addpath('C:\Codex\ofdm-wifi')`, then `run_rx_per` or `run_rx_plan` **by name**. Outputs are based on `pwd`, so they belong to that test folder. MATLAB's `run('full/path/script.m')` can temporarily change folders and should not be used for this workflow.
+
+### Test plans
+
+Open `run_rx_plan.m`, edit the mode groups and trim states, then click Run or type:
+
+```matlab
+run_rx_plan
+disp(plan.summary)
+```
+
+The supplied driver builds **8 separate tests**: 11ac/20 MHz, MCS 0 and 3, center channels 36 and 149, each with trims off and on. Its comments show how to add 11a/n and other bands/bandwidths. There is one active SISO radio per test. The default is 11 coarse power levels and 1,000 packets per level, or 88,000 total packets for the sample plan before any optional refinement. Reduce the matrix/packet count for a quick trial. Channel comparisons share the same baseband receiver model; no channel-dependent RF response is invented.
+
+Every plan has a timestamped parent, with a numbered folder per test. `plan_summary.csv` records mode, MCS, channel, bandwidth, trims, execution status, sensitivity status/estimate, and the output path. `plan_results.mat` is checkpointed after each test. The original test list/common settings/options are saved in `plan_configuration.mat`. Each successful test saves its full resolved configuration and measurements. With `continueOnError=true`, invalid configurations are recorded as failed with `error.txt` and other tests continue; execution status `completed` does not mean the PER specification passed. Setting it false saves the failure/checkpoint then stops. Completed earlier tests remain available if a later test is interrupted. There is no automatic resume/restart feature.
+
+You can also provide an explicit plan:
+
+```matlab
+tests = {struct('name','vht_mcs3','standard','11ac','mcs',3), ...
+         struct('name','ht_mcs3','standard','11n','mcs',3)};
+common = struct('band','5GHz','channelNumber',36,'bandwidth',20, ...
+    'inputPowerDBm',-100:5:-50,'packetsPerLevel',1000);
+plan = wifi_rx_plan(tests,common,struct('outputDir','results/my_plan'));
+```
+
+Each test overrides `common`; the plan owns the per-test output paths. Mode/coding values must form a valid configuration for the installed toolbox. There is no automatic translation between MCS indices across standards.
+
+### Sensitivity and optional 1 dB refinement
+
+`r.sensitivity` reports the first observed low-power crossing of `perThreshold` (default 10%):
+
+- `bracketed`: a failing power immediately precedes the lowest tested passing power. `bracketDBm` gives these measured endpoints; `estimateDBm` linearly interpolates PER versus dBm between them.
+- `below_sweep`: the weakest tested point already passes. The crossing is unbracketed and `estimateDBm` is NaN; extend the sweep toward weaker inputs.
+- `no_pass`: no tested point passes. The crossing is unbracketed and the estimate is NaN; extend toward stronger inputs or investigate impairments.
+
+`lowestPassingDBm` remains a measured grid point, distinct from the interpolated estimate. All contiguous pass windows and a `nonmonotonic` flag are retained, including when overload produces a second edge. The reported sensitivity concerns the first weak-input edge, not the upper overload limit. Interpolation is an estimate, not an extra measurement, IEEE certification, or a sensitivity confidence interval. The PER confidence bounds still describe each measured packet count. Inspect nonmonotonic/noisy curves before interpreting a crossing.
+
+In either driver, explicitly enable:
+
+```matlab
+cfg.refineSensitivity = true;  % use common.refineSensitivity in run_rx_plan
+cfg.refinementStepDB = 1;
+```
+
+The coarse sweep runs first. Only if it brackets a crossing does the simulator announce and measure **new** interior points at the requested step, using the same `packetsPerLevel`. Existing endpoints are never repeated. For a coarse bracket [-85, -80] dBm, refinement measures -84, -83, -82, and -81 dBm. Results are merged/sorted and sensitivity is recalculated. Refinement is one pass inside the coarse bracket; it does not extrapolate beyond that bracket or automatically extend the sweep. If the bracket is already narrow enough, or unbracketed, no extra packets are sent. No hidden refinement runs occur by default (`refineSensitivity=false`).
+
+`r.testedPowerDBm` and `r.summary` contain all coarse and fine points; `r.settings.inputPowerDBm` preserves the requested coarse sweep. `r.coarseLink`, `r.coarseSensitivity`, and `r.refinement` retain provenance, including the distinct refinement seed. `check_wifi_rx_workflow` validates interpolation, unbracketed states, refinement accounting/merging, repeat-run isolation, complex configuration export, and test-plan continuation/checkpointing with small packet budgets.
 
 ## Implemented signal chain
 

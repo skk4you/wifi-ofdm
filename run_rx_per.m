@@ -1,6 +1,7 @@
 %% Conducted Wi-Fi RX PER test driver
 % Edit the settings below, then click Run or type: run_rx_per
-% Runs ONE power sweep. Results remain in workspace variable r.
+% Runs ONE selected test; optional refinement must be enabled below.
+% Results remain in workspace variable r.
 % Unlike check_wifi_rx_per, this does not run additional validation sweeps.
 
 %% Wi-Fi mode and channel
@@ -19,6 +20,8 @@ cfg.inputPowerDBm = -100:5:0;     % DUT input dBm; change to -100:1:-50 for 1 dB
 cfg.packetsPerLevel = 1000;       % Exactly this many at EVERY level; no early stop
 cfg.perThreshold = 0.10;          % Passing threshold as fraction: 0.10 = 10% PER
 cfg.seed = 17;                    % Repeatable random payloads/noise
+cfg.refineSensitivity = false;    % true: add new points inside sensitivity bracket
+cfg.refinementStepDB = 1;         % Refinement uses SAME packetsPerLevel at each new point
 
 %% Receiver noise and fixed gain
 cfg.noiseFigureDB = 7;            % Input-referred NF; noise stays fixed across sweep
@@ -58,7 +61,9 @@ cfg.pilotTracking = 'PreEQ';      % 'PreEQ' or 'None'
 %% Figures and saved output
 cfg.makePlots = true;             % PER, received count, received SNR and EVM vs dBm
 cfg.outputDir = fullfile(pwd,'results','rx_per');
-% Existing files in this directory are replaced. Use a different folder per run.
+cfg.uniqueOutputDir = true;       % New timestamped subfolder for EVERY run
+% r.outputDir gives the actual folder. MAT/JSON save the full configuration.
+% Set uniqueOutputDir=false only when you intentionally want fixed filenames.
 
 %% Alternative mode examples -- uncomment ONE block to override settings
 % 2.4 GHz 802.11g, channel 6, 20 MHz:
@@ -89,3 +94,5 @@ r = wifi_rx_per(cfg);
 % r.lowestPassingDBm          % Lowest TESTED point meeting perThreshold
 % r.passWindowsDBm            % Contiguous passing ranges
 % r.noiseFloorDBm             % Fixed input-referred thermal noise + NF
+% r.sensitivity              % Interpolated crossing, bracket, status and pass windows
+% r.outputDir                % Actual timestamped output folder

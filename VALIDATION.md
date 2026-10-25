@@ -31,3 +31,11 @@ The saved demo completed too: combined trim reduced independent tone DC magnitud
 Tests verify the -93.96 dBm integrated noise floor, unchanged noise power as input power changes, calculated versus injected SNR, exact packet accounting, and nonzero confidence bounds after zero errors. An additional 20-packet-per-point, fixed-gain 10-bit ADC test produced PER 100%, 0%, and 100% at -100, -65, and -5 dBm, confirming simulated sensitivity and overload edges. Increasing NF by 3 dB increased the noise floor by 3 dB. The exported power-sweep and bathtub figures were visually inspected.
 
 These widely spaced smoke-test points do not measure a 1 dB-resolution sensitivity boundary. Use the full power sweep and an appropriate DUT impairment/noise budget for that experiment.
+
+## Version 3 workflow checks
+
+`check_wifi_rx_workflow` and the existing `check_wifi_sim` passed in `matlab_workflow.log` on MATLAB R2018a. The workflow test validates synthetic bracketed/unbracketed and nonmonotonic crossings, then runs an actual -85/-75 dBm coarse test with 1 dB refinement at 20 packets per level. Exactly 220 packets were counted at 11 unique levels; the final measured bracket was [-83, -82] dBm and the interpolated crossing was about -82.14 dBm. This is a small-budget integration result, not a hardware sensitivity claim.
+
+Two consecutive identical settings received separate timestamped directories. Configuration MAT/JSON files preserved complex DC settings. A three-case plan completed its first test, recorded an intentionally invalid second mode, then completed its third test and saved the summary/checkpoint and error record. The refined four-panel PNG was visually inspected.
+
+An additional `addpath` test launched from `test_output/external_run` saved both a single run and a plan beneath that current folder. A malformed vector-valued MCS was recorded as a failed row with NaN MCS; the following valid test completed. This passed in `matlab_plan_paths.log`.

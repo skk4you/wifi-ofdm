@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.0.0 — 2026-10-25
+
+- Added `run_rx_plan.m` and `wifi_rx_plan` for mode/MCS/channel/bandwidth/trim test matrices, with per-test results and checkpointed plan summaries.
+- Added timestamped output directories by default for conducted RX runs, full MAT/JSON configuration capture, and an explicit overwrite-in-place opt-out.
+- Added threshold-based sensitivity extraction, measured brackets, interpolation, unbracketed status flags, pass windows, and sensitivity CSV export.
+- Added opt-in fine-step sensitivity refinement that measures only new points inside the coarse bracket and retains coarse/fine provenance.
+- Added workflow regression checks and updated the single-test driver/documentation.
+
 ## 2.0.0 — 2026-10-25
 
 - Added conducted single-radio RX PER testing versus DUT input power in dBm, with a fixed thermal-noise/noise-figure budget.
