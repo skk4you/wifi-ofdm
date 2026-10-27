@@ -1,5 +1,15 @@
 # Changelog
 
+## 3.1.0 — 2026-10-28
+
+- Added a reviewed training guide and an explicit quick RX validation override; fixed the RX check to use acquired SNR points after power-grid edits.
+
+- Made the plotted SNR metric explicit: default reference-assisted MER (inverse received EVM), with optional L-LTF noise SNR and separate exported columns; no artificial SNR ceiling.
+
+- Added saved RX run/plan comparisons with PER, received L-LTF SNR and EVM overlays.
+- Added editable/interactive comparison driver, revision labels, original-grid preservation, and explicit handling of legacy runs without received SNR.
+- Added timestamped PNG/FIG/MAT and manifest/point CSV exports, plus comparison regression checks.
+
 ## 3.0.0 — 2026-10-25
 
 - Added `run_rx_plan.m` and `wifi_rx_plan` for mode/MCS/channel/bandwidth/trim test matrices, with per-test results and checkpointed plan summaries.

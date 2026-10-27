@@ -59,6 +59,7 @@ cfg.equalizer = 'MMSE';           % 'MMSE' or 'ZF'
 cfg.pilotTracking = 'PreEQ';      % 'PreEQ' or 'None'
 
 %% Figures and saved output
+cfg.snrMetric = 'mer';           % 'mer': inverse EVM, noise + distortion; 'ltf': training noise only
 cfg.makePlots = true;             % PER, received count, received SNR and EVM vs dBm
 cfg.outputDir = fullfile(pwd,'results','rx_per');
 cfg.uniqueOutputDir = true;       % New timestamped subfolder for EVERY run

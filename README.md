@@ -1,6 +1,8 @@
 # Wi-Fi TX/RX and RF calibration simulator
 
-**Version 3.0.0** — RX test plans, timestamped run folders, and sensitivity extraction with optional fine power steps. See [CHANGELOG.md](CHANGELOG.md).
+Start here: [Training guide](TRAINING_GUIDE.md) — walkthroughs, measurement definitions, labs, and troubleshooting.
+
+**Version 3.1.0** — saved-run overlays for PER, received SNR and EVM, alongside test plans and sensitivity refinement. See [CHANGELOG.md](CHANGELOG.md).
 
 MATLAB R2018a with **WLAN System Toolbox** (renamed WLAN Toolbox in later releases). This project uses the installed standard-specific packet generator and receivers; it does not substitute arbitrary OFDM tone allocations for Wi-Fi packets.
 
@@ -35,7 +37,7 @@ disp(r.summary)
 
 This sends exactly 1,000 simulated packets at **every** input level, with no error-count early stop. `ReceivedOK` counts packets that synchronize and recover the entire known PSDU correctly. `LostOrBad = Sent - ReceivedOK`, and `PER = LostOrBad / Sent`; both fractional PER and PER percent are exported. A missing acquisition counts as a packet error. The 95% Wilson bounds describe the finite packet count; zero errors in 1,000 packets still has an upper bound near 0.38%.
 
-The test figure and exported `rx_per.png` show four plots versus DUT input power: PER, successfully received packet count, **estimated received SNR**, and RMS EVM (%). Received SNR uses the two received L-LTF symbols after the RX frontend and timing/CFO correction: their difference estimates noise power; their average estimates signal power after subtracting the average's noise bias. Signal and noise powers are summed across acquired packets before taking the dB ratio. `ReceivedSNRdB` and `SNRPackets` expose the estimate and its packet population; the existing `SNRdB` column retains the configured input SNR for comparison. No acquisition produces NaN/gaps rather than an injected-SNR substitute. This is occupied-L-LTF-carrier SNR, so it need not equal full-band input sample SNR. It assumes the channel/signal is stable across the repeated training symbols: static IQ/clipping distortion can cancel in the difference and is not fully represented as noise. Use EVM alongside it. Both estimates include acquired packets with bad payloads, and are conditional on acquisition.
+The RX figure and exported `rx_per.png` show PER, received packet count, effective received SNR, and RMS EVM versus DUT input power. By default, `snrMetric='mer'` plots **MER = -20*log10(EVMPercent/100)**, using actual received/equalized symbol errors against the simulation reference. This is a reference-assisted effective SNR including noise and distortion; it is exactly the negative of EVM in dB, not an independent DUT firmware SNR statistic. The curve falls when residual EVM worsens through overload. `ReceivedMERdB` exports it. No-acquisition points remain NaN/gaps. Choosing `snrMetric='ltf'` instead plots the received L-LTF noise estimate from the repeated training-symbol difference. Static distortion can cancel in that difference, so it may keep rising even while payload EVM worsens. `LTFNoiseSNRdB` explicitly names that estimate; the older `ReceivedSNRdB` column remains its backward-compatible alias, and `SNRPackets` records its sample population. The `SNRdB` column remains the configured input link budget. MER/EVM include acquired packets with bad payloads. Neither metric is artificially clipped at 45 dB: a 45 dB MER corresponds to about 0.562% residual EVM and requires the corresponding receiver impairment floor. An otherwise ideal AWGN receiver can still yield a nearly linear effective-SNR curve. See [MathWorks modulation accuracy guidance](https://www.mathworks.com/help/comm/ug/measure-modulation-accuracy.html) for the distinction between MER and noise-only SNR.
 
 The input power is at the DUT connector/reference plane, not the generator before cable loss. The receiver noise floor is held fixed at `10*log10(k*290*Fs)+30+noiseFigureDB` dBm, using the full complex-sample bandwidth `Fs`. At 20 MHz and 7 dB NF this is about -94 dBm. Each packet's generator waveform is normalized to the requested average packet power, then amplified with fixed gain. Changing input power changes SNR; noise is **not** scaled to follow it. The 290 K noise-figure model follows [MathWorks thermal noise guidance](https://www.mathworks.com/help/comm/ref/receiverthermalnoise.html).
 
@@ -122,6 +124,32 @@ cfg.refinementStepDB = 1;
 The coarse sweep runs first. Only if it brackets a crossing does the simulator announce and measure **new** interior points at the requested step, using the same `packetsPerLevel`. Existing endpoints are never repeated. For a coarse bracket [-85, -80] dBm, refinement measures -84, -83, -82, and -81 dBm. Results are merged/sorted and sensitivity is recalculated. Refinement is one pass inside the coarse bracket; it does not extrapolate beyond that bracket or automatically extend the sweep. If the bracket is already narrow enough, or unbracketed, no extra packets are sent. No hidden refinement runs occur by default (`refineSensitivity=false`).
 
 `r.testedPowerDBm` and `r.summary` contain all coarse and fine points; `r.settings.inputPowerDBm` preserves the requested coarse sweep. `r.coarseLink`, `r.coarseSensitivity`, and `r.refinement` retain provenance, including the distinct refinement seed. `check_wifi_rx_workflow` validates interpolation, unbracketed states, refinement accounting/merging, repeat-run isolation, complex configuration export, and test-plan continuation/checkpointing with small packet budgets.
+
+
+## Compare saved RX runs
+
+Open `run_compare_rx.m` and click Run (or type `run_compare_rx`). Set `runFolders` to individual timestamped RX run directories or `rx_per.mat` files. If left empty, the driver opens a folder picker repeatedly; select each desired run and then Cancel to finish. An entire test-plan directory or `plan_results.mat` is also accepted: completed tests expand into individual curves and failed/empty tests are skipped.
+
+The figure overlays **PER (%), effective received SNR/MER (dB), and RMS EVM (%) versus DUT input power**, using matching colors/styles across panels. Measured grids and missing-acquisition gaps are preserved; no packets are simulated. The default `snrMetric='mer'` explicitly derives effective SNR from the saved received EVM, including for older runs. To compare the separate repeated-training noise estimate, choose `snrMetric='ltf'`: missing legacy L-LTF estimates then stay blank and are never replaced with injected SNR or MER. Both quantities are retained separately in exported comparison points as `EffectiveSNRdB` and `ReceivedSNRdB`; `PlottedSNRdB` and the manifest `SNRMetric` identify the selected curve. PER confidence bars are shown when saved bounds are available.
+
+```matlab
+comparison = wifi_compare_rx_runs( ...
+    {'C:\MyTests\TrimOff\results\rx_per\RUN_FOLDER', ...
+     'C:\MyTests\TrimOn\results\rx_per\RUN_FOLDER'}, ...
+    {'Revision A - trim off','Revision B - trim on'});
+
+% In-memory results work too:
+comparison = wifi_compare_rx_runs({rOff,rOn},{'Trim off','Trim on'});
+
+% Or compare every completed test in a saved plan:
+comparison = wifi_compare_rx_runs({plan.outputDir});
+```
+
+Labels are optional; automatic labels identify mode/MCS/channel/bandwidth/trim settings or plan test names. For software revisions, assign explicit labels in the driver: historical version information cannot be inferred reliably from the current code. When using plans, custom label count must match the number of expanded completed runs.
+
+Each comparison gets its own timestamped folder under `<MATLAB current folder>/results/compare_rx`, containing `comparison.png`, editable `comparison.fig`, `comparison.mat`, `comparison_manifest.csv`, and a long-form `comparison_points.csv`. Source measurements are not modified. The manifest records source paths, settings (including packet mode, payload, coding, GI, NF, ADC and trims), measured power ranges, received-SNR availability, and sensitivity recomputed at a **common** comparison PER threshold (default 10%). Different modes/grids/packet counts may be compared, but this does not imply equivalent modulation/coding or hardware conditions; inspect the manifest and confidence bounds.
+
+Options: `snrMetric='mer'` (default) or `'ltf'` selects the signal-quality metric; `makePlots=false` skips figures; `outputDir=''` skips export; `showPERConfidence=false` hides confidence bars; `perThreshold` sets the common sensitivity threshold; `title` sets the figure name. `comparison.curves` retains each original sorted grid, `comparison.points` contains combined labeled rows, and `comparison.outputDir` gives the actual export folder. `check_wifi_compare_rx` validates mixed grids, NaN gaps, legacy received-SNR omissions, plan expansion, labels and exports without transmitting any new packets.
 
 ## Implemented signal chain
 

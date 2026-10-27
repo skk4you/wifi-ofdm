@@ -39,3 +39,17 @@ These widely spaced smoke-test points do not measure a 1 dB-resolution sensitivi
 Two consecutive identical settings received separate timestamped directories. Configuration MAT/JSON files preserved complex DC settings. A three-case plan completed its first test, recorded an intentionally invalid second mode, then completed its third test and saved the summary/checkpoint and error record. The refined four-panel PNG was visually inspected.
 
 An additional `addpath` test launched from `test_output/external_run` saved both a single run and a plan beneath that current folder. A malformed vector-valued MCS was recorded as a failed row with NaN MCS; the following valid test completed. This passed in `matlab_plan_paths.log`.
+
+## Saved-run comparison checks (3.1)
+
+`check_wifi_compare_rx` passed on MATLAB R2018a in `matlab_compare.log`. Synthetic stored-run fixtures verify native unequal power grids (3/2/3 points retained as eight rows), acquisition NaN gaps, user revision labels, common-threshold sensitivity, missing legacy received-SNR handling without substituting injected SNR, plan expansion with failed tests skipped, duplicate-grid rejection, isolated repeated export folders, and PNG/FIG/MAT/CSV artifacts. The exported three-panel overlay was visually inspected. These checks exercise saved-data comparison only; they do not generate new PHY measurements or imply measured differences between software revisions.
+
+## Effective SNR/MER selection
+
+`check_wifi_rx_snr_metrics` passed in `matlab_snr_plot_verified.log`, including direct assertions on the SNR subplot's actual YData/label. The default plot now uses MER = -20*log10(EVMPercent/100), while the separate received L-LTF noise estimate remains exported and selectable. A fixed-gain ADC/IQ-impaired test produced EVM about 10.50% then 79.76%, with MER 19.58 then 1.96 dB as overload increased. The training estimates were different (27.13 and 7.21 dB). No 45 dB ceiling is imposed; a helper regression verifies 0.1% EVM maps to 60 dB, zero residual error to Inf, and missing acquisitions to NaN. Comparison regression checks also passed with both metric selections. These are deliberately exaggerated impairment smoke tests, not a calibration to an office DUT's 45 dB ceiling.
+
+## Second publication review — 2026-10-28
+
+A fresh MATLAB R2018a run passed `check_wifi_sim`, `check_wifi_rx_per` with explicit -100:5:-60 dBm / 20-packet quick overrides, `check_wifi_rx_workflow`, `check_wifi_compare_rx`, and `check_wifi_rx_snr_metrics`. The basic OFDM project's staged publication sources also passed `check_ofdm_study`. The local log ends with `SECOND REVIEW: ALL CHECKS PASSED` in `matlab_second_review_final.log`.
+
+The RX regression check was corrected to select sufficiently acquired finite SNR points rather than assume the second grid point was acquired. It now accepts explicit quick overrides while preserving the user's default -100:5:0 dBm / 1,000-packet configuration. That full 21-level default was not rerun in this review. Both training guides were cross-checked against the actual settings, signal processing, measurements, output files, and model limitations. Generated results/logs are excluded from publication.

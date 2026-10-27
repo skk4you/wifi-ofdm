@@ -12,6 +12,7 @@ common.noiseFigureDB = 7;
 common.adcBits = Inf;
 common.cfoHz = 20000;
 common.makePlots = true;
+common.snrMetric = 'mer';       % Effective SNR from EVM; choose 'ltf' for training noise
 common.refineSensitivity = false; % true: explicitly add NEW levels near crossing
 common.refinementStepDB = 1;
 

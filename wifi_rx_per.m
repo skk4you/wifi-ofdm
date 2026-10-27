@@ -8,6 +8,7 @@ defaults.inputPowerDBm=-100:1:-50;
 defaults.channelNumber=36; defaults.band='5GHz';
 defaults.packetsPerLevel=1000; defaults.perThreshold=0.10;
 defaults.uniqueOutputDir=true;
+defaults.snrMetric='mer'; % Effective received SNR from residual symbol error; 'ltf' for noise-only estimate.
 defaults.refineSensitivity=false; defaults.refinementStepDB=1;
 defaults.outputDir=fullfile(pwd,'results','rx_per');
 names=fieldnames(settings);
@@ -16,6 +17,8 @@ for k=1:numel(names)
     defaults.(names{k})=settings.(names{k});
 end
 c=defaults;
+assert(ischar(c.snrMetric) && any(strcmp(c.snrMetric,{'mer','ltf'})), ...
+    'snrMetric must be mer or ltf.');
 assert(~isempty(c.inputPowerDBm),'Specify an input power vector in dBm.');
 validateattributes(c.inputPowerDBm,{'numeric'},{'vector','real','finite'});
 c.inputPowerDBm=c.inputPowerDBm(:).';
@@ -45,7 +48,7 @@ end
 % Channel number is center-channel metadata; waveform remains complex baseband.
 % No regional channel plan or channel-dependent RF response is synthesized.
 base=c; base=rmfield(base,{'channelNumber','band','packetsPerLevel','perThreshold', ...
-    'uniqueOutputDir','refineSensitivity','refinementStepDB'});
+    'uniqueOutputDir','refineSensitivity','refinementStepDB','snrMetric'});
 base.maxPackets=c.packetsPerLevel; base.minPackets=c.packetsPerLevel;
 base.maxPacketErrors=c.packetsPerLevel; % Exactly N packets, including weak levels.
 base.makePlots=false; base.outputDir='';
@@ -102,6 +105,10 @@ r.summary=table(x(:),link.settings.snrDB(:),r.sent(:),r.received(:), ...
     link.syncFailures(:),link.evmPercent(:),link.rxSNRDB(:),link.rxSNRPackets(:), ...
     'VariableNames',{'InputPowerDBm','SNRdB','Sent','ReceivedOK','LostOrBad','PER', ...
     'PERPercent','PERLower95','PERUpper95','SyncFailures','EVMPercent','ReceivedSNRdB','SNRPackets'});
+r.summary.ReceivedMERdB=wifi_evm_to_mer(link.evmPercent(:));
+r.summary.LTFNoiseSNRdB=link.rxSNRDB(:); % ReceivedSNRdB retained for backward compatibility.
+r.plottedSNRDB=r.summary.ReceivedMERdB;
+if strcmp(c.snrMetric,'ltf'), r.plottedSNRDB=r.summary.LTFNoiseSNRdB; end
 r.sensitivity=wifi_rx_sensitivity(x,r.per,c.perThreshold);
 r.passWindowsDBm=r.sensitivity.passWindowsDBm;
 r.lowestPassingDBm=r.sensitivity.lowestPassingDBm;
@@ -129,9 +136,15 @@ if c.makePlots
     subplot(2,2,2); plot(x,r.received,'o-'); grid on;
     xlabel('DUT input power (dBm)'); ylabel('Successfully received packets');
     ylim([0 c.packetsPerLevel]); title('Acquisition failures + bad payloads count as lost');
-    subplot(2,2,3); plot(x,link.rxSNRDB,'o-'); grid on;
-    xlabel('DUT input power (dBm)'); ylabel('Estimated received SNR (dB)');
-    title('Received L-LTF estimate; no acquisition shown as gaps');
+    subplot(2,2,3); plot(x,r.plottedSNRDB,'o-'); grid on;
+    xlabel('DUT input power (dBm)');
+    if strcmp(c.snrMetric,'mer')
+        ylabel('Effective received SNR / MER (dB)');
+        title('Residual symbol error: -20 log10(EVM / 100)');
+    else
+        ylabel('Received L-LTF noise SNR (dB)');
+        title('Repeated-training noise estimate (distortion may cancel)');
+    end
     subplot(2,2,4); plot(x,link.evmPercent,'o-'); grid on;
     xlabel('DUT input power (dBm)'); ylabel('RMS EVM (%)');
     title('EVM of acquired packets; no acquisition shown as gaps');
